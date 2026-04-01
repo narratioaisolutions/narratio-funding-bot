@@ -8,11 +8,13 @@ from openai import OpenAI
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 SLACK_TOKEN = os.environ["SLACK_BOT_TOKEN"]
 
-CHANNEL_ID = "C0AQBDG19EY"  # cambia si quieres
+CHANNEL_ID = "C0AQBDG19EY"
 
 
-# 🔎 SCRAPING (simple de momento)
+# 🔎 SCRAPING
 def get_opportunities():
+    print("🔎 Buscando ayudas...")
+
     url = "https://www.cdti.es/"
     response = requests.get(url)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -27,11 +29,14 @@ def get_opportunities():
                 "descripcion": texto
             })
 
+    print(f"✅ Ayudas encontradas: {len(ayudas)}")
     return ayudas
 
 
-# 🧠 IA → ANALIZA
+# 🧠 IA
 def analyze_with_ai(ayuda):
+    print(f"\n🧠 Analizando: {ayuda['titulo']}")
+
     prompt = f"""
 Evalúa esta ayuda para una startup B2B de IA.
 
@@ -48,12 +53,19 @@ Descripción: {ayuda['descripcion']}
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response.choices[0].message.content
+    resultado = response.choices[0].message.content
+
+    print("📊 Resultado IA:")
+    print(resultado)
+
+    return resultado
 
 
 # 🚀 SLACK
 def send_to_slack(message):
-    requests.post(
+    print("\n🚀 Enviando a Slack...")
+
+    response = requests.post(
         "https://slack.com/api/chat.postMessage",
         headers={
             "Authorization": f"Bearer {SLACK_TOKEN}",
@@ -65,9 +77,13 @@ def send_to_slack(message):
         }
     )
 
+    print("📡 Respuesta Slack:", response.text)
 
-# 🔥 MAIN PIPELINE
+
+# 🔥 MAIN
 if __name__ == "__main__":
+    print("🚀 INICIO FUNDING BOT\n")
+
     ayudas = get_opportunities()
 
     resultados = []
@@ -75,10 +91,20 @@ if __name__ == "__main__":
     for ayuda in ayudas:
         analysis = analyze_with_ai(ayuda)
 
-        # filtro básico
-        if any(x in analysis for x in ["8/10", "9/10", "10/10"]):
-            resultados.append(f"{ayuda['titulo']}\n{analysis}")
+        # 🔥 MODO PRUEBA PRO → NO FILTRA NADA
+        resultados.append(f"{ayuda['titulo']}\n{analysis}")
 
     if resultados:
         mensaje = "\n\n---\n\n".join(resultados)
-        send_to_slack(f"🚀 *Funding Radar*\n\n{mensaje}")
+
+        today = datetime.now().strftime("%d/%m/%Y")
+
+        mensaje_final = f"🚀 Funding Radar TEST — {today}\n\n{mensaje}"
+
+        print("\n📨 MENSAJE FINAL:")
+        print(mensaje_final)
+
+        send_to_slack(mensaje_final)
+
+    else:
+        print("❌ No hay resultados")
