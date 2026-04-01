@@ -24,4 +24,6 @@ jobs:
           pip install requests
 
       - name: Run script
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: python narratio_funding_bot.py
