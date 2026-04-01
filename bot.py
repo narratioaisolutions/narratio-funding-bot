@@ -1,24 +1,19 @@
 import requests
 import os
 
+# 🔑 KEYS (desde GitHub Secrets)
+SERP_API_KEY = os.environ.get("SERP_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
 
-requests.post(SLACK_WEBHOOK, json={"text": "🚨 TEST SLACK FUNCIONANDO"})
-print("Mensaje enviado")
-exit()
-
-# 🔑 CONFIG (usa GitHub Secrets)
-SERP_API_KEY = "${SERP_API_KEY}"
-OPENAI_API_KEY = "${OPENAI_API_KEY}"
-SLACK_WEBHOOK = "${SLACK_WEBHOOK}"
-
+# 🔍 QUERIES
 queries = [
     "subvenciones startups IA España convocatoria",
     "EU funding AI startups open call",
     "CDTI ayudas innovación tecnológica empresas plazo abierto"
 ]
 
-# 🔍 SERPAPI
+# 🔍 BUSCAR CON SERPAPI
 def search(query):
     url = "https://serpapi.com/search.json"
     params = {
@@ -26,10 +21,14 @@ def search(query):
         "api_key": SERP_API_KEY,
         "num": 5
     }
-    res = requests.get(url, params=params).json()
-    return res.get("organic_results", [])
 
-# 🧠 OPENAI
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    return data.get("organic_results", [])
+
+
+# 🧠 ANALIZAR CON OPENAI
 def analyze(title, snippet):
     prompt = f"""
     Evalúa si esta ayuda encaja para una startup B2B SaaS de IA (Narratio).
@@ -42,24 +41,38 @@ def analyze(title, snippet):
     {snippet}
     """
 
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2
+            }
+        )
 
-    return response.json()["choices"][0]["message"]["content"]
+        data = response.json()
 
-# 💬 SLACK
-def send(message):
+        if "choices" not in data:
+            return "LOW - error API"
+
+        return data["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        return f"LOW - error {e}"
+
+
+# 💬 ENVIAR A SLACK
+def send_to_slack(message):
+    if not SLACK_WEBHOOK:
+        raise ValueError("❌ SLACK_WEBHOOK no definido")
+
     requests.post(SLACK_WEBHOOK, json={"text": message})
+
 
 # 🚀 MAIN
 def run():
@@ -73,6 +86,7 @@ def run():
 
             analysis = analyze(title, snippet)
 
+            # 👉 FILTRO
             if "LOW" in analysis:
                 continue
 
@@ -85,7 +99,9 @@ def run():
 
 {link}
 """
-            send(message)
+
+            send_to_slack(message)
+
 
 if __name__ == "__main__":
     run()
