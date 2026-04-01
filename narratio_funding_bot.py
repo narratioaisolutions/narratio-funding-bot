@@ -1,92 +1,95 @@
 import requests
-import os
 
-SERP_API_KEY = os.environ.get("SERP_API_KEY")
-SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
+# 🔐 TU WEBHOOK DE SLACK
+SLACK_WEBHOOK = "PEGA_AQUI_TU_WEBHOOK"
 
+# 🔎 BÚSQUEDAS
 queries = [
+    "subvenciones startups España 2026 ENISA CDTI",
     "EIC Accelerator 2026 convocatoria",
-    "CDTI NEOTEC 2026 ayudas startups",
-    "ENISA financiación startups España"
+    "ayudas startups tecnologicas España abiertas"
 ]
 
-BAD_SOURCES = ["linkedin.com", "twitter.com"]
+# 🚫 FILTRO DE LINKS NO RELEVANTES
+def clean(link):
+    blacklist = ["blog", "medium", "guia", "pdf"]
+    return not any(b in link for b in blacklist)
 
+# 🧠 IDENTIFICAR PROGRAMA
+def extract_program(title):
+    t = title.lower()
+
+    if "enisa" in t:
+        return "ENISA"
+    if "cdti" in t or "neotec" in t:
+        return "CDTI NEOTEC 2026"
+    if "eic" in t:
+        return "EIC Accelerator Open 2026"
+
+    return None
+
+# 🏛 PRIORIDAD A FUENTE OFICIAL
+def is_official(link):
+    return any(domain in link for domain in [
+        "enisa.es",
+        "cdti.es",
+        "europa.eu"
+    ])
+
+# 🤖 PROBABILIDAD SIMPLE
+def evaluate(title, snippet):
+    text = (title + " " + snippet).lower()
+
+    if "subvención" in text or "grant" in text:
+        return 60
+    if "préstamo" in text:
+        return 40
+    if "europe" in text:
+        return 20
+
+    return 10
+
+# 🧾 FORMATO FINAL (TIPO CLAUDE)
+def format_message(opps):
+    msg = "🔎 Rastreo de ayudas públicas — Semana actual\n\n"
+    msg += "Convocatorias abiertas con encaje para Narratio (IA, SaaS B2B, startup, I+D+i, internacionalización):\n\n"
+
+    for i, o in enumerate(opps, 1):
+
+        # descripciones tipo memo
+        if o["title"] == "CDTI NEOTEC 2026":
+            desc = "Subvención a fondo perdido hasta €325K (70–85% del presupuesto). Startups de base tecnológica <3 años. Apertura marzo/abril — cierre estimado abril/mayo. Concurrencia competitiva."
+        elif o["title"] == "ENISA":
+            desc = "Préstamo participativo €25K–€1.5M sin avales. Abierta todo el año (FIFO). Fondos propios ≥ importe solicitado."
+        elif o["title"] == "EIC Accelerator Open 2026":
+            desc = "Grant hasta €2.5M + equity hasta €10M. Short proposal abierta permanentemente. Cut-offs periódicos durante el año."
+        else:
+            desc = "Convocatoria relevante para startups tecnológicas."
+
+        emoji = "🚨" if o["prob"] >= 50 else ""
+
+        msg += f"{i}. {o['title']} {emoji}\n"
+        msg += f"{desc}\n"
+        msg += f"{o['link']}\n\n"
+
+    return msg
+
+# 🌐 BÚSQUEDA (SERPAPI)
 def search(query):
     url = "https://serpapi.com/search.json"
     params = {
         "q": query,
-        "api_key": SERP_API_KEY,
-        "num": 5
-    }
-    return requests.get(url, params=params).json().get("organic_results", [])
-
-
-def clean(link):
-    return link and not any(b in link for b in BAD_SOURCES)
-
-
-# 🔥 CORE: PROBABILIDAD REAL
-def evaluate(title, snippet):
-    text = f"{title} {snippet}".lower()
-
-    # default
-    prob = 0
-    tag = ""
-    fit = ""
-    urgency = ""
-
-    # 🧠 EIC (muy potente pero difícil)
-    if "eic" in text:
-        prob = 0.05   # <5% real
-        tag = "🔥 ALTA (difícil)"
-        fit = "Deeptech + escala + VC-ready"
-        urgency = "APLICAR SOLO si narrativa muy sólida"
-
-    # 🧠 CDTI
-    elif "cdti" in text or "neotec" in text:
-        prob = 0.35
-        tag = "🔥 ALTA"
-        fit = "Startup tecnológica early-stage"
-        urgency = "APLICAR ESTA SEMANA"
-
-    # 🧠 ENISA
-    elif "enisa" in text:
-        prob = 0.6
-        tag = "🟢 ALTA PROBABILIDAD"
-        fit = "Complemento financiero"
-        urgency = "APLICAR YA (rápido)"
-
-    else:
-        return None
-
-    return {
-        "tag": tag,
-        "prob": prob,
-        "fit": fit,
-        "urgency": urgency
+        "api_key": "TU_API_KEY"
     }
 
+    res = requests.get(url, params=params)
+    data = res.json()
 
-def format_message(opps):
-    message = "🎯 PRIORIDAD SEMANAL\n\n"
+    return data.get("organic_results", [])
 
-    for i, o in enumerate(opps, 1):
-        prob_percent = int(o["prob"] * 100)
-
-        message += f"""{i}. {o['title']} ({o['tag']})
-Probabilidad: {prob_percent}%
-Acción: {o['urgency']}
-Fit: {o['fit']}
-Link: {o['link']}
-
-"""
-
-    return message
-
-
+# 🚀 MAIN
 def run():
-    opportunities = []
+    programs = {}
 
     for q in queries:
         results = search(q)
@@ -99,26 +102,40 @@ def run():
             if not clean(link):
                 continue
 
-            eval_data = evaluate(title, snippet)
-            if not eval_data:
+            program = extract_program(title)
+            if not program:
                 continue
 
-            opportunities.append({
-                "title": title,
-                "link": link,
-                **eval_data
-            })
+            prob = evaluate(title, snippet)
 
-    # 🔥 ordenar por probabilidad REAL
-    opportunities = sorted(opportunities, key=lambda x: x["prob"], reverse=True)
+            # deduplicación + prioridad oficial
+            if program in programs:
+                if is_official(link):
+                    programs[program] = {
+                        "title": program,
+                        "link": link,
+                        "prob": prob
+                    }
+            else:
+                programs[program] = {
+                    "title": program,
+                    "link": link,
+                    "prob": prob
+                }
 
-    # 🔥 top 3 → foco semanal
-    top = opportunities[:3]
+    # ordenar por probabilidad
+    opportunities = sorted(programs.values(), key=lambda x: x["prob"], reverse=True)
+
+    top = opportunities[:4]
 
     if top:
         message = format_message(top)
-        requests.post(SLACK_WEBHOOK, json={"text": message})
 
+        requests.post(
+            SLACK_WEBHOOK,
+            json={"text": message}
+        )
 
+# ▶️ EJECUTAR
 if __name__ == "__main__":
     run()
