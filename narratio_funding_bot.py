@@ -4,18 +4,14 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from openai import OpenAI
 
-# 🔐 TOKENS
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
 SLACK_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
 CHANNEL_ID = "C0AQBDG19EY"
 
 
-# 🔎 1. SCRAPING SIMPLE (ejemplo CDTI/EU fake demo)
 def get_opportunities():
-    url = "https://www.cdti.es/"  # puedes cambiar luego
+    url = "https://www.cdti.es/"
     html = requests.get(url).text
     soup = BeautifulSoup(html, "html.parser")
 
@@ -30,42 +26,27 @@ def get_opportunities():
     return ayudas
 
 
-# 🧠 2. IA → ANALIZA Y PUNTÚA
 def analyze_with_ai(ayuda):
-    prompt = f"""
-Analiza esta ayuda pública para una startup B2B de IA (tipo Narratio).
+    response = client.chat.completions.create(
+        model="gpt-5-mini",
+        messages=[{
+            "role": "user",
+            "content": f"""
+Evalúa esta ayuda para una startup B2B de IA.
 
-Devuelve SOLO esto:
+Devuelve:
 Score (1-10)
-Razón breve
+Motivo breve
 
-Ayuda:
 Título: {ayuda['titulo']}
 Descripción: {ayuda['descripcion']}
 """
-
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[{"role": "user", "content": prompt}]
+        }]
     )
 
     return response.choices[0].message.content
 
 
-# ✍️ 3. FORMATEAR MENSAJE
-def format_message(results):
-    today = datetime.now().strftime("%d/%m/%Y")
-
-    msg = f"*Narratio Funding Radar — {today}*\n\n"
-
-    for r in results:
-        msg += f"*{r['titulo']}*\n"
-        msg += f"{r['analysis']}\n\n"
-
-    return msg
-
-
-# 🚀 4. ENVIAR A SLACK
 def send_to_slack(message):
     requests.post(
         "https://slack.com/api/chat.postMessage",
@@ -80,22 +61,17 @@ def send_to_slack(message):
     )
 
 
-# ▶️ 5. PIPELINE
 if __name__ == "__main__":
     ayudas = get_opportunities()
 
-    resultados = []
+    mensajes = []
 
-    for a in ayudas:
-        analysis = analyze_with_ai(a)
+    for ayuda in ayudas:
+        analysis = analyze_with_ai(ayuda)
 
-        # filtro simple
-        if "8" in analysis or "9" in analysis or "10" in analysis:
-            resultados.append({
-                "titulo": a["titulo"],
-                "analysis": analysis
-            })
+        if any(x in analysis for x in ["8", "9", "10"]):
+            mensajes.append(f"{ayuda['titulo']}\n{analysis}\n")
 
-    if resultados:
-        msg = format_message(resultados)
-        send_to_slack(msg)
+    if mensajes:
+        texto = "\n---\n".join(mensajes)
+        send_to_slack(f"🚀 Funding Radar:\n\n{texto}")
