@@ -1,9 +1,9 @@
 name: Narratio Funding Bot
 
 on:
-  schedule:
-    - cron: '30 6 * * 1'
   workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'  # todos los días a las 9
 
 jobs:
   run:
@@ -21,9 +21,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install requests beautifulsoup4 openai
 
       - name: Run script
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python narratio_funding_bot.py
