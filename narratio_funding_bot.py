@@ -1,19 +1,17 @@
 import requests
 import os
 
-# 🔑 KEYS (desde GitHub Secrets)
 SERP_API_KEY = os.environ.get("SERP_API_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
 
-# 🔍 QUERIES
 queries = [
-    "subvenciones startups IA España convocatoria",
-    "EU funding AI startups open call",
-    "CDTI ayudas innovación tecnológica empresas plazo abierto"
+    "EIC Accelerator 2026 convocatoria",
+    "CDTI NEOTEC 2026 ayudas startups",
+    "ENISA financiación startups España"
 ]
 
-# 🔍 BUSCAR CON SERPAPI
+BAD_SOURCES = ["linkedin.com", "twitter.com"]
+
 def search(query):
     url = "https://serpapi.com/search.json"
     params = {
@@ -21,86 +19,105 @@ def search(query):
         "api_key": SERP_API_KEY,
         "num": 5
     }
-
-    response = requests.get(url, params=params)
-    data = response.json()
-
-    return data.get("organic_results", [])
+    return requests.get(url, params=params).json().get("organic_results", [])
 
 
-# 🧠 ANALIZAR CON OPENAI
-def analyze(title, snippet):
-    prompt = f"""
-    Evalúa si esta ayuda encaja para una startup B2B SaaS de IA (Narratio).
-
-    HIGH = muy relevante
-    MEDIUM = interesante
-    LOW = no relevante
-
-    {title}
-    {snippet}
-    """
-
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2
-            }
-        )
-
-        data = response.json()
-
-        if "choices" not in data:
-            return "LOW - error API"
-
-        return data["choices"][0]["message"]["content"]
-
-    except Exception as e:
-        return f"LOW - error {e}"
+def clean(link):
+    return link and not any(b in link for b in BAD_SOURCES)
 
 
-# 💬 ENVIAR A SLACK
-def send_to_slack(message):
-    if not SLACK_WEBHOOK:
-        raise ValueError("❌ SLACK_WEBHOOK no definido")
+# 🔥 CORE: PROBABILIDAD REAL
+def evaluate(title, snippet):
+    text = f"{title} {snippet}".lower()
 
-    requests.post(SLACK_WEBHOOK, json={"text": message})
+    # default
+    prob = 0
+    tag = ""
+    fit = ""
+    urgency = ""
+
+    # 🧠 EIC (muy potente pero difícil)
+    if "eic" in text:
+        prob = 0.05   # <5% real
+        tag = "🔥 ALTA (difícil)"
+        fit = "Deeptech + escala + VC-ready"
+        urgency = "APLICAR SOLO si narrativa muy sólida"
+
+    # 🧠 CDTI
+    elif "cdti" in text or "neotec" in text:
+        prob = 0.35
+        tag = "🔥 ALTA"
+        fit = "Startup tecnológica early-stage"
+        urgency = "APLICAR ESTA SEMANA"
+
+    # 🧠 ENISA
+    elif "enisa" in text:
+        prob = 0.6
+        tag = "🟢 ALTA PROBABILIDAD"
+        fit = "Complemento financiero"
+        urgency = "APLICAR YA (rápido)"
+
+    else:
+        return None
+
+    return {
+        "tag": tag,
+        "prob": prob,
+        "fit": fit,
+        "urgency": urgency
+    }
 
 
-# 🚀 MAIN
-def run():
-    for query in queries:
-        results = search(query)
+def format_message(opps):
+    message = "🎯 PRIORIDAD SEMANAL\n\n"
 
-        for r in results:
-            title = r.get("title")
-            link = r.get("link")
-            snippet = r.get("snippet", "")
+    for i, o in enumerate(opps, 1):
+        prob_percent = int(o["prob"] * 100)
 
-            analysis = analyze(title, snippet)
+        message += f"""{i}. {o['title']} ({o['tag']})
+Probabilidad: {prob_percent}%
+Acción: {o['urgency']}
+Fit: {o['fit']}
+Link: {o['link']}
 
-            # 👉 FILTRO
-            if "LOW" in analysis:
-                continue
-
-            message = f"""
-🚨 AYUDA DETECTADA
-
-{title}
-
-{analysis}
-
-{link}
 """
 
-            send_to_slack(message)
+    return message
+
+
+def run():
+    opportunities = []
+
+    for q in queries:
+        results = search(q)
+
+        for r in results:
+            title = r.get("title", "")
+            link = r.get("link", "")
+            snippet = r.get("snippet", "")
+
+            if not clean(link):
+                continue
+
+            eval_data = evaluate(title, snippet)
+            if not eval_data:
+                continue
+
+            opportunities.append({
+                "title": title,
+                "link": link,
+                **eval_data
+            })
+
+    # 🔥 ordenar por probabilidad REAL
+    opportunities = sorted(opportunities, key=lambda x: x["prob"], reverse=True)
+
+    # 🔥 top 3 → foco semanal
+    top = opportunities[:3]
+
+    if top:
+        message = format_message(top)
+        requests.post(SLACK_WEBHOOK, json={"text": message})
 
 
 if __name__ == "__main__":
