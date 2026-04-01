@@ -1,110 +1,99 @@
-import os
 import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
-from openai import OpenAI
+import time
 
-# 🔐 KEYS
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-SLACK_TOKEN = os.environ["SLACK_BOT_TOKEN"]
+# 🔑 KEYS
+SERP_API_KEY = "TU_SERPAPI_KEY"
+OPENAI_API_KEY = "TU_OPENAI_KEY"
+SLACK_WEBHOOK = "TU_SLACK_WEBHOOK"
 
-CHANNEL_ID = "C0AQBDG19EY"
+# 🔍 QUERIES (afinadas)
+queries = [
+    "subvenciones startups IA España convocatoria",
+    "EU funding AI startups open call",
+    "CDTI ayudas innovación tecnológica empresas plazo abierto",
+]
 
-
-# 🔎 SCRAPING
-def get_opportunities():
-    print("🔎 Buscando ayudas...")
-
-    url = "https://www.cdti.es/"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    ayudas = []
-
-    for h in soup.find_all("h2")[:5]:
-        texto = h.text.strip()
-        if texto:
-            ayudas.append({
-                "titulo": texto,
-                "descripcion": texto
-            })
-
-    print(f"✅ Ayudas encontradas: {len(ayudas)}")
-    return ayudas
-
-
-# 🧠 IA
-def analyze_with_ai(ayuda):
-    print(f"\n🧠 Analizando: {ayuda['titulo']}")
-
+# 🧠 ANALISIS IA
+def analyze_with_openai(title, snippet):
     prompt = f"""
-Evalúa esta ayuda para una startup B2B de IA.
+    Analiza si esta ayuda encaja para:
 
-Devuelve EXACTAMENTE:
-Score: X/10
-Motivo: breve
+    Startup B2B SaaS de IA / data infra (Narratio)
 
-Título: {ayuda['titulo']}
-Descripción: {ayuda['descripcion']}
-"""
+    Debe cumplir:
+    - Empresa privada
+    - Tecnología / innovación
+    - Escalable
 
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    Descarta:
+    - ONGs
+    - investigación académica
 
-    resultado = response.choices[0].message.content
+    Resultado:
+    HIGH / MEDIUM / LOW + motivo
 
-    print("📊 Resultado IA:")
-    print(resultado)
-
-    return resultado
-
-
-# 🚀 SLACK
-def send_to_slack(message):
-    print("\n🚀 Enviando a Slack...")
+    Texto:
+    {title}
+    {snippet}
+    """
 
     response = requests.post(
-        "https://slack.com/api/chat.postMessage",
+        "https://api.openai.com/v1/chat/completions",
         headers={
-            "Authorization": f"Bearer {SLACK_TOKEN}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
         },
         json={
-            "channel": CHANNEL_ID,
-            "text": message
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2
         }
     )
 
-    print("📡 Respuesta Slack:", response.text)
+    return response.json()["choices"][0]["message"]["content"]
 
+# 🔍 BUSCADOR SERPAPI
+def search(query):
+    url = "https://serpapi.com/search.json"
+    params = {
+        "q": query,
+        "api_key": SERP_API_KEY,
+        "num": 5
+    }
 
-# 🔥 MAIN
+    res = requests.get(url, params=params).json()
+    return res.get("organic_results", [])
+
+# 💬 SLACK
+def send_to_slack(message):
+    requests.post(SLACK_WEBHOOK, json={"text": message})
+
+# 🚀 RUN
+def run():
+    for query in queries:
+        results = search(query)
+
+        for r in results:
+            title = r.get("title")
+            link = r.get("link")
+            snippet = r.get("snippet", "")
+
+            analysis = analyze_with_openai(title, snippet)
+
+            if "HIGH" in analysis or "MEDIUM" in analysis:
+                message = f"""
+🚨 NUEVA AYUDA DETECTADA
+
+{title}
+
+{analysis}
+
+{link}
+"""
+                send_to_slack(message)
+
+# 🔁 LOOP
 if __name__ == "__main__":
-    print("🚀 INICIO FUNDING BOT\n")
-
-    ayudas = get_opportunities()
-
-    resultados = []
-
-    for ayuda in ayudas:
-        analysis = analyze_with_ai(ayuda)
-
-        # 🔥 MODO PRUEBA PRO → NO FILTRA NADA
-        resultados.append(f"{ayuda['titulo']}\n{analysis}")
-
-    if resultados:
-        mensaje = "\n\n---\n\n".join(resultados)
-
-        today = datetime.now().strftime("%d/%m/%Y")
-
-        mensaje_final = f"🚀 Funding Radar TEST — {today}\n\n{mensaje}"
-
-        print("\n📨 MENSAJE FINAL:")
-        print(mensaje_final)
-
-        send_to_slack(mensaje_final)
-
-    else:
-        print("❌ No hay resultados")
+    while True:
+        run()
+        time.sleep(86400)  # cada 24h
