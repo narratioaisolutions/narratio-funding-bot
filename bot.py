@@ -1,4 +1,11 @@
 import requests
+import os
+
+SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
+
+requests.post(SLACK_WEBHOOK, json={"text": "🚨 TEST SLACK FUNCIONANDO"})
+print("Mensaje enviado")
+exit()
 
 # 🔑 CONFIG (usa GitHub Secrets)
 SERP_API_KEY = "${SERP_API_KEY}"
