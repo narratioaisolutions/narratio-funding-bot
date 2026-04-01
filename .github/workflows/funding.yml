@@ -1,9 +1,9 @@
 name: Narratio Funding Bot
 
 on:
-  schedule:
-    - cron: '0 9 * * *'   # todos los días a las 9 UTC
   workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * *'   # todos los días
 
 jobs:
   run:
@@ -16,14 +16,14 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
 
       - name: Run bot
         env:
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        run: python bot.py
+        run: python narratio_funding_bot.py
